@@ -7,6 +7,9 @@ import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 import android.util.Log;
 
+import rish.crearo.sensorfusionlib.listeners.FusionListener;
+import rish.crearo.sensorfusionlib.listeners.VerboseFusionListener;
+
 /**
  * Created by rish on 10/7/17.
  *
@@ -56,14 +59,24 @@ public class SensorFusion implements SensorEventListener {
     private float mGyroTrajectoryRaw[] = new float[3];
     private float mFusedTrajectory[] = new float[3];
 
-    private FusionListenerOrientationOnly mFusionListener;
+    private VerboseFusionListener mVerboseFusionListener;
+    private FusionListener mFusionListener;
 
-    public SensorFusion(Context context, FusionListenerOrientationOnly fusionListener) {
+    public SensorFusion(Context context, VerboseFusionListener verboseFusionListener) {
+        initSensors(context);
+        mVerboseFusionListener = verboseFusionListener;
+    }
+
+    public SensorFusion(Context context, FusionListener fusionListener) {
+        initSensors(context);
+        mFusionListener = fusionListener;
+    }
+
+    private void initSensors(Context context) {
         mSensorManager = (SensorManager) context.getSystemService(Context.SENSOR_SERVICE);
         mSensorGyro = mSensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE);
         mSensorAcc = mSensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
         mSensorMag = mSensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD);
-        this.mFusionListener = fusionListener;
     }
 
     public void start() {
@@ -80,9 +93,13 @@ public class SensorFusion implements SensorEventListener {
     public void onSensorChanged(SensorEvent event) {
         if (event.sensor.getType() == mSensorGyro.getType()) {
             calculateRawGyroOrientation(event.values, event.timestamp);
-            //mFusionListener.onGyroOrientation(mGyroTrajectoryRaw, event.timestamp);
+            if (mVerboseFusionListener != null)
+                mVerboseFusionListener.onGyroOrientation(mGyroTrajectoryRaw, event.timestamp);
             calculateFusedOrientation();
-            mFusionListener.onFusedOrientation(mFusedTrajectory, event.timestamp);
+            if (mVerboseFusionListener != null)
+                mVerboseFusionListener.onFusedOrientation(mFusedTrajectory, event.timestamp);
+            if (mFusionListener != null)
+                mFusionListener.onFusedOrientation(mFusedTrajectory, event.timestamp);
         } else if (event.sensor.getType() == mSensorMag.getType()) {
             if (mMagData == null) mMagData = new float[3];
             System.arraycopy(event.values, 0, mMagData, 0, event.values.length);
@@ -90,7 +107,8 @@ public class SensorFusion implements SensorEventListener {
             if (mAccData == null) mAccData = new float[3];
             System.arraycopy(event.values, 0, mAccData, 0, event.values.length);
             calculateAccMagOrientation();
-            //mFusionListener.onAccMagOrientation(mAccMagTrajectory, event.timestamp);
+            if (mVerboseFusionListener != null)
+                mVerboseFusionListener.onAccMagOrientation(mAccMagTrajectory, event.timestamp);
         }
     }
 
@@ -174,24 +192,5 @@ public class SensorFusion implements SensorEventListener {
     @Override
     public void onAccuracyChanged(Sensor sensor, int accuracy) {
         // do nothing
-    }
-
-    public interface FusionListener extends FusionListenerOrientationOnly {
-        /**
-         * @param gyroOrientation PRY (x, y, z)
-         */
-        void onGyroOrientation(float gyroOrientation[], long timestamp);
-
-        /**
-         * @param accMagOrientation PRY (x, y, z)
-         */
-        void onAccMagOrientation(float accMagOrientation[], long timestamp);
-    }
-
-    public interface FusionListenerOrientationOnly {
-        /**
-         * @param fusedOrientation PRY (x, y, z)
-         */
-        void onFusedOrientation(float fusedOrientation[], long timestamp);
     }
 }
