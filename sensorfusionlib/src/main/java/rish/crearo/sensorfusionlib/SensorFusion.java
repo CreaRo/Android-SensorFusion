@@ -19,14 +19,11 @@ import rish.crearo.sensorfusionlib.listeners.VerboseFusionListener;
 public class SensorFusion implements SensorEventListener {
 
     private static final String TAG = SensorFusion.class.getSimpleName();
-
-    private SensorManager mSensorManager;
-    private Sensor mSensorGyro, mSensorAcc, mSensorMag;
-
     /* Nanoseconds to seconds */
     private static final float NS2S = 1.0f / 1000000000.0f;
-
-    private long mPrevGyroTimestamp = 0;
+    private SensorManager sensorManager;
+    private Sensor sensorGyro, sensorAcc, sensorMag;
+    private long prevGyroTimestamp = 0;
 
     /**
      * This is the absolute difference in sensor values from the previously recorded reading.
@@ -34,159 +31,157 @@ public class SensorFusion implements SensorEventListener {
      * For acc/mag, it is the difference in orientation angles (YPR) obtained using
      * SensorManager.getOrientation(rotationMatrix) between current and prev orientations
      **/
-    private float mGyroDiff[] = new float[3];
-    private float mAccMagDiff[] = new float[3];
+    private float gyroDiff[] = new float[3];
+    private float accMagDiff[] = new float[3];
 
     /**
      * Using these to clone values received from SensorEventListener callback
      */
-    private float mAccData[], mMagData[];
+    private float accData[], magData[];
 
     /**
      * Stores YPR(in that order) of the fused magnetometer and accelerometer obtained by calling
      * SensorManager.getRotationMatrix(acc, mag), and then passing the rotation matrix received to
      * SensorManager.getOrientation(rot).
      */
-    private float mAccMagPrevOrientation[];
-    private float mAccMagOrientation[] = new float[3];
+    private float accMagPrevOrientation[];
+    private float accMagOrientation[] = new float[3];
 
     /* temp variable storing rotation matrix */
-    private float mAccMagRotationMatrix[] = new float[16];
+    private float accMagRotationMatrix[] = new float[16];
 
     /* pitch, roll, yaw (x, y, z) */
-    private float mAccMagTrajectory[] = new float[3];
-    private float mGyroTrajectoryCorrected[] = new float[3];
-    private float mGyroTrajectoryRaw[] = new float[3];
-    private float mFusedTrajectory[] = new float[3];
+    private float accMagTrajectory[] = new float[3];
+    private float gyroTrajectoryCorrected[] = new float[3];
+    private float gyroTrajectoryRaw[] = new float[3];
+    private float fusedTrajectory[] = new float[3];
 
-    private VerboseFusionListener mVerboseFusionListener;
-    private FusionListener mFusionListener;
+    private VerboseFusionListener verboseFusionListener;
+    private FusionListener fusionListener;
+    private float alpha = 0.995f;
+    private float oneMinusAlpha = 1.0f - alpha;
 
     public SensorFusion(Context context, VerboseFusionListener verboseFusionListener) {
         initSensors(context);
-        mVerboseFusionListener = verboseFusionListener;
+        this.verboseFusionListener = verboseFusionListener;
     }
 
     public SensorFusion(Context context, FusionListener fusionListener) {
         initSensors(context);
-        mFusionListener = fusionListener;
+        this.fusionListener = fusionListener;
     }
 
     private void initSensors(Context context) {
-        mSensorManager = (SensorManager) context.getSystemService(Context.SENSOR_SERVICE);
-        mSensorGyro = mSensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE);
-        mSensorAcc = mSensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
-        mSensorMag = mSensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD);
+        sensorManager = (SensorManager) context.getSystemService(Context.SENSOR_SERVICE);
+        sensorGyro = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE);
+        sensorAcc = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
+        sensorMag = sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD);
     }
 
     public void start() {
-        mSensorManager.registerListener(this, mSensorGyro, SensorManager.SENSOR_DELAY_FASTEST);
-        mSensorManager.registerListener(this, mSensorAcc, SensorManager.SENSOR_DELAY_FASTEST);
-        mSensorManager.registerListener(this, mSensorMag, SensorManager.SENSOR_DELAY_FASTEST);
+        sensorManager.registerListener(this, sensorGyro, SensorManager.SENSOR_DELAY_FASTEST);
+        sensorManager.registerListener(this, sensorAcc, SensorManager.SENSOR_DELAY_FASTEST);
+        sensorManager.registerListener(this, sensorMag, SensorManager.SENSOR_DELAY_FASTEST);
     }
 
     public void stop() {
-        mSensorManager.unregisterListener(this);
+        sensorManager.unregisterListener(this);
     }
 
     @Override
     public void onSensorChanged(SensorEvent event) {
-        if (event.sensor.getType() == mSensorGyro.getType()) {
+        if (event.sensor.getType() == sensorGyro.getType()) {
             calculateRawGyroOrientation(event.values, event.timestamp);
-            if (mVerboseFusionListener != null)
-                mVerboseFusionListener.onGyroOrientation(mGyroTrajectoryRaw, event.timestamp);
+            if (verboseFusionListener != null)
+                verboseFusionListener.onGyroOrientation(gyroTrajectoryRaw, event.timestamp);
             calculateFusedOrientation();
-            if (mVerboseFusionListener != null)
-                mVerboseFusionListener.onFusedOrientation(mFusedTrajectory, event.timestamp);
-            if (mFusionListener != null)
-                mFusionListener.onFusedOrientation(mFusedTrajectory, event.timestamp);
-        } else if (event.sensor.getType() == mSensorMag.getType()) {
-            if (mMagData == null) mMagData = new float[3];
-            System.arraycopy(event.values, 0, mMagData, 0, event.values.length);
-        } else if (event.sensor.getType() == mSensorAcc.getType()) {
-            if (mAccData == null) mAccData = new float[3];
-            System.arraycopy(event.values, 0, mAccData, 0, event.values.length);
+            if (verboseFusionListener != null)
+                verboseFusionListener.onFusedOrientation(fusedTrajectory, event.timestamp);
+            if (fusionListener != null)
+                fusionListener.onFusedOrientation(fusedTrajectory, event.timestamp);
+        } else if (event.sensor.getType() == sensorMag.getType()) {
+            if (magData == null) magData = new float[3];
+            System.arraycopy(event.values, 0, magData, 0, event.values.length);
+        } else if (event.sensor.getType() == sensorAcc.getType()) {
+            if (accData == null) accData = new float[3];
+            System.arraycopy(event.values, 0, accData, 0, event.values.length);
             calculateAccMagOrientation();
-            if (mVerboseFusionListener != null)
-                mVerboseFusionListener.onAccMagOrientation(mAccMagTrajectory, event.timestamp);
+            if (verboseFusionListener != null)
+                verboseFusionListener.onAccMagOrientation(accMagTrajectory, event.timestamp);
         }
     }
 
     private void calculateRawGyroOrientation(float angularVelocity[], long timestamp) {
-        if (mPrevGyroTimestamp != 0) {
-            float dt = (timestamp - mPrevGyroTimestamp) * NS2S;
-            mGyroDiff[0] = dt * angularVelocity[0];
-            mGyroDiff[1] = dt * angularVelocity[1];
-            mGyroDiff[2] = dt * angularVelocity[2];
+        if (prevGyroTimestamp != 0) {
+            float dt = (timestamp - prevGyroTimestamp) * NS2S;
+            gyroDiff[0] = dt * angularVelocity[0];
+            gyroDiff[1] = dt * angularVelocity[1];
+            gyroDiff[2] = dt * angularVelocity[2];
         }
-        mPrevGyroTimestamp = timestamp;
+        prevGyroTimestamp = timestamp;
 
         /* Add these diff values to raw and corrected trajectory, just the same */
-        mGyroTrajectoryRaw[0] += mGyroDiff[0];
-        mGyroTrajectoryRaw[1] += mGyroDiff[1];
-        mGyroTrajectoryRaw[2] += mGyroDiff[2];
+        gyroTrajectoryRaw[0] += gyroDiff[0];
+        gyroTrajectoryRaw[1] += gyroDiff[1];
+        gyroTrajectoryRaw[2] += gyroDiff[2];
 
-        mGyroTrajectoryCorrected[0] += mGyroDiff[0];
-        mGyroTrajectoryCorrected[1] += mGyroDiff[1];
-        mGyroTrajectoryCorrected[2] += mGyroDiff[2];
+        gyroTrajectoryCorrected[0] += gyroDiff[0];
+        gyroTrajectoryCorrected[1] += gyroDiff[1];
+        gyroTrajectoryCorrected[2] += gyroDiff[2];
     }
 
     private void calculateAccMagOrientation() {
-        if (mMagData != null && mAccData != null) {
-            if (SensorManager.getRotationMatrix(mAccMagRotationMatrix, null, mAccData, mMagData)) {
-                SensorManager.getOrientation(mAccMagRotationMatrix, mAccMagOrientation);
-                if (mAccMagPrevOrientation == null) {
-                    mAccMagPrevOrientation = new float[3];
-                    mAccMagDiff = new float[3];
+        if (magData != null && accData != null) {
+            if (SensorManager.getRotationMatrix(accMagRotationMatrix, null, accData, magData)) {
+                SensorManager.getOrientation(accMagRotationMatrix, accMagOrientation);
+                if (accMagPrevOrientation == null) {
+                    accMagPrevOrientation = new float[3];
+                    accMagDiff = new float[3];
                 } else {
-                    mAccMagDiff[0] = mAccMagOrientation[0] - mAccMagPrevOrientation[0];
-                    mAccMagDiff[1] = mAccMagOrientation[1] - mAccMagPrevOrientation[1];
-                    mAccMagDiff[2] = mAccMagOrientation[2] - mAccMagPrevOrientation[2];
+                    accMagDiff[0] = accMagOrientation[0] - accMagPrevOrientation[0];
+                    accMagDiff[1] = accMagOrientation[1] - accMagPrevOrientation[1];
+                    accMagDiff[2] = accMagOrientation[2] - accMagPrevOrientation[2];
 
-                    /**
-                     *  Add these diff values to mAccMagTrajectory
+                    /*  Add these diff values to accMagTrajectory
                      *  The getOrientation method returns value like so : -yaw, -pitch, roll (-z, -x, y)
                      *  To stay consistent throughout, I convert these here to the PRY (x,y,z)
                      *  I've followed throughout the code
                      **/
-                    mAccMagTrajectory[0] -= mAccMagDiff[1]; // pitch
-                    mAccMagTrajectory[1] += mAccMagDiff[2]; // roll
-                    mAccMagTrajectory[2] -= mAccMagDiff[0]; // yaw
+                    accMagTrajectory[0] -= accMagDiff[1]; // pitch
+                    accMagTrajectory[1] += accMagDiff[2]; // roll
+                    accMagTrajectory[2] -= accMagDiff[0]; // yaw
                 }
 
                 /* set cur values as prev */
-                mAccMagPrevOrientation[0] = mAccMagOrientation[0];
-                mAccMagPrevOrientation[1] = mAccMagOrientation[1];
-                mAccMagPrevOrientation[2] = mAccMagOrientation[2];
+                accMagPrevOrientation[0] = accMagOrientation[0];
+                accMagPrevOrientation[1] = accMagOrientation[1];
+                accMagPrevOrientation[2] = accMagOrientation[2];
             } else
                 Log.e(TAG, "There was an error in calculating acc-mag orientation");
         }
     }
 
-    private float alpha = 0.995f;
-    private float oneMinusAlpha = 1.0f - alpha;
-
     private void calculateFusedOrientation() {
-        mFusedTrajectory[0] = (alpha * mGyroTrajectoryCorrected[0]) + (oneMinusAlpha * mAccMagTrajectory[0]); // pitch
-        mFusedTrajectory[1] = (alpha * mGyroTrajectoryCorrected[1]) + (oneMinusAlpha * mAccMagTrajectory[1]); // roll
-        mFusedTrajectory[2] = (alpha * mGyroTrajectoryCorrected[2]) + (oneMinusAlpha * mAccMagTrajectory[2]); // yaw
-        System.arraycopy(mFusedTrajectory, 0, mGyroTrajectoryCorrected, 0, mFusedTrajectory.length);
+        fusedTrajectory[0] = (alpha * gyroTrajectoryCorrected[0]) + (oneMinusAlpha * accMagTrajectory[0]); // pitch
+        fusedTrajectory[1] = (alpha * gyroTrajectoryCorrected[1]) + (oneMinusAlpha * accMagTrajectory[1]); // roll
+        fusedTrajectory[2] = (alpha * gyroTrajectoryCorrected[2]) + (oneMinusAlpha * accMagTrajectory[2]); // yaw
+        System.arraycopy(fusedTrajectory, 0, gyroTrajectoryCorrected, 0, fusedTrajectory.length);
     }
 
     public void reset() {
-        mGyroDiff = new float[3];
-        mAccData = null;
-        mMagData = null;
+        gyroDiff = new float[3];
+        accData = null;
+        magData = null;
 
-        mAccMagPrevOrientation = null;
-        mAccMagOrientation = new float[3];
-        mAccMagDiff = new float[3];
-        mAccMagRotationMatrix = new float[16];
+        accMagPrevOrientation = null;
+        accMagOrientation = new float[3];
+        accMagDiff = new float[3];
+        accMagRotationMatrix = new float[16];
 
-        mAccMagTrajectory = new float[3]; /* -yaw, -pitch, roll (-z, -x, y) */
-        mGyroTrajectoryCorrected = new float[3]; /* pitch, roll, yaw (x, y, z) */
-        mGyroTrajectoryRaw = new float[3]; /* pitch, roll, yaw (x, y, z) */
-        mFusedTrajectory = new float[3]; /* pitch, roll, yaw (x, y, z) */
+        accMagTrajectory = new float[3]; /* -yaw, -pitch, roll (-z, -x, y) */
+        gyroTrajectoryCorrected = new float[3]; /* pitch, roll, yaw (x, y, z) */
+        gyroTrajectoryRaw = new float[3]; /* pitch, roll, yaw (x, y, z) */
+        fusedTrajectory = new float[3]; /* pitch, roll, yaw (x, y, z) */
     }
 
     @Override
