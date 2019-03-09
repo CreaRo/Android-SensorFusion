@@ -11,9 +11,9 @@ import rish.crearo.sensorfusionlib.listeners.VerboseFusionListener;
 
 import static java.lang.Math.toDegrees;
 
-public class MainActivity extends AppCompatActivity implements VerboseFusionListener {
+public class FusedSensorActivity extends AppCompatActivity implements VerboseFusionListener {
 
-    private static final String TAG = MainActivity.class.getSimpleName();
+    private static final String TAG = FusedSensorActivity.class.getSimpleName();
     private SensorFusion mSensorFusion;
     private TextView textView;
 
